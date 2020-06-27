@@ -1,0 +1,99 @@
+[[model]]
+
+[engine]
+time = 0 bind time
+    in [ms]
+
+[membrane]
+level = 0 bind pace
+
+[[protocol]]
+# Level  Start    Length   Period   Multiplier
+1.0      100.0    0.5      1000.0   0
+
+[[script]]
+import matplotlib.pyplot as pl
+import numpy as np
+import myokit
+from scipy.optimize import curve_fit
+import myokit.lib.fit as fit
+
+# Get model and protocol, create simulation
+m11, p11, s11 = myokit.load("Base_models\Human RA (Courtemanche-1998) - 2D_original_IKAch.mmt")
+
+############################# CURRENT CLAMP PROTOCOL #####################
+def runProtocol_0D(m11, drug):
+    bcl = 1000 #333 #500 #1000
+    p11 = myokit.Protocol()
+    p11.schedule(1,10,1.0,bcl,0)
+    
+    ical = drug**1.3 / (drug**1.3 + 600**1.3) 
+    ik1 = (0.0919*drug**3 / (drug**3 + 0.1854**3)) - (0.3112*drug**1.8 / (drug**1.8 + 7.461**1.8))
+    ikr = drug**0.99 / (drug**0.99 + 608**0.99) ### Himmel 2007
+    ina = drug**3.1 / (drug**3.1 + 446**3.1)
+    ito = drug**1.1 / (drug**1.1 + 2188**1.1)    
+    ikur = drug**0.6437 / (drug**0.6437 + 494.6**0.6437)   
+    ikach = (0.0906*drug**8.281 / (drug**8.281 + 0.7442**8.281)) - (0.2651*drug**4.064 / (drug**4.064 + 9.186**4.064))
+    ileak = 1 + (drug**1.088)*1.067/(drug**1.088 + 16.43**1.088) ## based on murine atrial CM #Mustroph JMCC 2018
+    incx = 1 + ((drug**1.088)*1.067/(drug**1.088 + 16.43**1.088)) ## based on murine atrial CM #Mustroph JMCC 2018    
+    print "Ethanol Block: " + " ical " + str(ical) + ", ik1 " + str(ik1) +  ", ikr " + str(ikr) + ", ina " + str(ina) + ", ito " + str(ito) + ", ikur " + str(ikur) + ", ikach " + str(ikach) + ", ileak " + str(ileak) + ", incx " + str(incx)
+    
+    s11 = myokit.Simulation(m11, p11, apd_var='membrane.V')
+    s11.set_constant('parameters.K_o', 5.4)
+    s11.set_constant('parameters.Ca_o', 1.8)
+    s11.set_constant('parameters.Na_o', 140) 
+    s11.set_constant('parameters.ICaL_Block_ethanol', ical)
+    s11.set_constant('parameters.IK1_Block_ethanol', ik1)
+    s11.set_constant('parameters.IKr_Block_ethanol', ikr)
+    s11.set_constant('parameters.INa_Block_ethanol', ina)
+    s11.set_constant('parameters.Ito_Block_ethanol', ito)    
+    s11.set_constant('parameters.IKur_Block_ethanol', ikur)
+    s11.set_constant('parameters.IKAch_Block_ethanol', ikach)
+    s11.set_constant('parameters.Ileak_Factor_ethanol', ileak)
+    s11.set_constant('parameters.INCX_Factor_ethanol', incx)    
+    s11.set_constant('parameters.ICaL_Block', 0)
+    s11.set_constant('parameters.IK1_Block', 0)
+    s11.set_constant('parameters.IKr_Block', 0)
+    s11.set_constant('parameters.IKs_Block', 0)
+    s11.set_constant('parameters.IKur_Block', 0)
+    s11.set_constant('parameters.INa_Block', 0)
+    s11.set_constant('parameters.INaL_Block', 0)
+    s11.set_constant('parameters.INaK_Block', 0)
+    s11.set_constant('parameters.INCX_Block', 0)
+    s11.set_constant('parameters.Ito_Block', 0)
+    
+    s11.pre(50*bcl)
+    s11.set_tolerance(1e-8, 1e-8)
+    vt11=0.9*s11.state()[m11.get('membrane.V').indice()]
+    vt11_rmp=s11.state()[m11.get('membrane.V').indice()]
+    d11, apds11 = s11.run(1000, apd_threshold=vt11)
+    start11 = apds11 ['start'] [0] 
+    duration11 = apds11 ['duration'] [0]
+    dvdtmax11 = np.max(d11['dot(membrane.V)'])
+    
+    return d11, duration11, dvdtmax11, vt11_rmp
+
+#############################################################################
+datalog_eth0, apd_eth0, dvdt_eth0, rmp_eth0 = runProtocol_0D(m11, 0)
+datalog_eth08, apd_eth08, dvdt_eth08, rmp_eth08 = runProtocol_0D(m11, 0.8)
+datalog_eth80, apd_eth80, dvdt_eth80, rmp_eth80 = runProtocol_0D(m11, 80)
+datalog_eth400, apd_eth400, dvdt_eth400, rmp_eth400 = runProtocol_0D(m11, 400)
+
+print "APD90 = " + str(apd_eth0) + "," + "dvdt_max = " + str(dvdt_eth0) + "," + "RMP = " + str(rmp_eth0)
+print "APD90 = " + str(apd_eth08) + "," + "dvdt_max = " + str(dvdt_eth08) + "," + "RMP = " + str(rmp_eth08)
+print "APD90 = " + str(apd_eth80) + "," + "dvdt_max = " + str(dvdt_eth80) + "," + "RMP = " + str(rmp_eth80)
+print "APD90 = " + str(apd_eth400) + "," + "dvdt_max = " + str(dvdt_eth400) + "," + "RMP = " + str(rmp_eth400)
+
+pl.figure()
+pl.subplot(2,1,1)
+pl.plot(datalog_eth0['environment.time'], datalog_eth0['membrane.V'], '-k')
+pl.plot(datalog_eth08['environment.time'], datalog_eth08['membrane.V'], '-b')
+pl.plot(datalog_eth80['environment.time'], datalog_eth80['membrane.V'], '-r')
+pl.plot(datalog_eth400['environment.time'], datalog_eth400['membrane.V'], '-g')
+pl.subplot(2,1,2)
+pl.plot(datalog_eth0['environment.time'], datalog_eth0['intracellular_ion_concentrations.Ca_i'], '-k')
+pl.plot(datalog_eth08['environment.time'], datalog_eth08['intracellular_ion_concentrations.Ca_i'], '-b')
+pl.plot(datalog_eth80['environment.time'], datalog_eth80['intracellular_ion_concentrations.Ca_i'], '-r')
+pl.plot(datalog_eth400['environment.time'], datalog_eth400['intracellular_ion_concentrations.Ca_i'], '-g')
+pl.show()
+

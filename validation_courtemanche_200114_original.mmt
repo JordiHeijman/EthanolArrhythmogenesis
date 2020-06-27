@@ -1,0 +1,1140 @@
+[[model]]
+
+[engine]
+time = 0 bind time
+    in [ms]
+
+[membrane]
+level = 0 bind pace
+
+[[protocol]]
+# Level  Start    Length   Period   Multiplier
+1.0      100.0    0.5      1000.0   0
+
+[[script]]
+import matplotlib.pyplot as pl
+import numpy as np
+import myokit
+from scipy.optimize import curve_fit
+import myokit.lib.fit as fit
+
+# Get model and protocol, create simulation
+
+base_model = "Base_models/Human RA (Courtemanche-1998) - 2D_original_IKAch.mmt"
+
+m, p, s = myokit.load(base_model)
+
+#Set up voltage-clamp simulation
+# Get pacing variable, remove binding
+p = m.get('membrane.level')
+p.set_binding(None)
+# Get membrane potential, demote to an ordinary variable
+v = m.get('membrane.V')
+v.demote()
+v.set_rhs(0)
+v.set_binding('pace') # Bind to the pacing mechanism
+
+#nai = m.get('intracellular_ion_concentrations.Na_i')
+#nai.demote()
+#nai.set_rhs(10)
+
+volt_steps_Na = (-80, -70.01, -60.01, -50.01, -40.01, -30.01, -20.01, -10.01, 0.01, 10.01)
+volt_steps_Ca = (-50, -40, -30, -20, -10, 0.01, 10, 20, 30, 40, 50)
+volt_steps_to = np.arange(-40, 70.01, 10)
+Bebarova_volt_steps_Na = np.arange(-75.01, 75.01, 5)
+Bebarova_volt_steps_Ca = (-40, -30, -20, -10, 0.01, 10, 20, 30, 40, 50, 60)
+Bebarova_volt_steps_to = np.arange(-75, 75.01, 15)
+Bebarova_volt_steps_K1 = np.arange(-120, 10.01, 10)
+Bebarova_volt_steps_Ca_inact = np.arange(-80, 30.01, 10)
+Bebarova_volt_steps_to_inact = np.arange(-120, -10.01, 10)
+Hu_volt_steps_Kur = np.arange(-60, 60.01, 10)
+Oleary_yang_volt_steps = np.arange(-60, 60.01, 5)
+
+def func_tauCa(x, a_fast, tau_fast, a_slow, tau_slow):
+    return a_fast * np.exp(-x/tau_fast) + a_slow * np.exp(-x/tau_slow)
+
+def func_tauto(x, a_fast, tau_fast, a_slow, tau_slow):
+    return a_fast * np.exp(-x/tau_fast) + a_slow * np.exp(-x/tau_slow)
+
+def func_taucaff(x, a, tau, c):
+    return a * np.exp(-x/tau) + c
+
+################################Experimental Database########################
+##Laszlo, 2009##
+###Sodium###
+exp_Na_base_x = (-70, -60, -50, -40, -30, -20, -10, 0, 10)
+exp_Na_base_y = (-0.612244897959183, -41.83673469387755, -75.51020408163265, -75.71428571428572, -62.6530612244898, -43.469387755102055, -23.469387755102048, -5.918367346938776, -0.204081632653061)
+xerr_Na_base = (-2.244897959, -9.591836735, -6.12244898, -3.469387755, -3.06122449, -3.265306122, -2.040816327, 0, 0)
+norm_exp_Na_base_y = (-0.008086253, -0.552560647, -0.997304582, -1, -0.827493261, -0.574123989, -0.309973046, -0.078167116, -0.002695418)
+norm_xerr_Na_base = (-0.029649596, -0.126684636, -0.080862534, -0.045822102, -0.040431267, -0.043126685, -0.026954178, 0, 0)
+exp_Na_ethanol_y = (-8.163265306, -23.87755102, -38.7755102, -35.30612245, -27.34693878, -16.93877551, -7.346938776, -0.612244898, 0)
+xerr_Na_ethanol = (-5.102040816, -6.12244898, -5.102040816, -4.489795918, -3.87755102, -3.265306122, -2.040816327, 0, 0)
+norm_exp_Na_ethanol_y = (-0.107816712, -0.315363881, -0.51212938, -0.466307278, -0.361185984, -0.223719677, -0.09703504, -0.008086253, 0)
+norm_xerr_Na_ethanol = (-0.067385445, -0.080862534, -0.067385445, -0.059299191, -0.051212938, -0.043126685, -0.026954178, 0, 0)
+###Calcium###
+exp_Ca_base_x = (-50, -40, -30, -20, -10, 0, 10, 20, 30, 40, 50)
+exp_Ca_base_y = (0.07673148, -1.173469388, -7.678772296, -20.408565, -28.85264342, -28.52121163, -22.78081311, -15.81672827, -9.311827093, -4.031415716, -0.128555359)
+xerr_Ca_base = (-0.000401735, -0.765306122, -1.633054797, -2.397959184, -2.244897959, -1.784509079, -1.479591837, -1.071830307, -0.71468745, -0.051823879, -0.051020408)
+norm_exp_Ca_base_y = (0.002659426, -0.040671122, -0.266137566, -0.707337789, -1, -0.988512949, -0.789557226, -0.548189919, -0.322737399, -0.139724311, -0.004455583)
+norm_xerr_Ca_base = (-1.39237E-05, -0.026524645, -0.056599833, -0.083110554, -0.077805625, -0.061849067, -0.05128098, -0.037148427, -0.024770259, -0.001796157, -0.00176831)
+exp_Ca_ethanol_y = (0.025309336, -0.102442552, -1.199582195, -5.918769082, -12.4750924, -15.25550378, -13.13835771, -9.18447694, -5.281214848, -2.195082758, -0.128555359)
+xerr_Ca_ethanol = (0, 0, 0, -0.918367347, -1.173469388, -1.326128877, -1.326128877, -1.020408163, -0.612646633, -0.102040816, -0.000401735)
+norm_exp_Ca_ethanol_y = (0.000877193, -0.003550543, -0.041576163, -0.205137845, -0.432372598, -0.528738513, -0.455360624, -0.318323587, -0.183040936, -0.076079087, -0.004455583)
+norm_xerr_Ca_ethanol = (0, 0, 0, -0.031829574, -0.040671122, -0.045962128, -0.045962128, -0.035366193, -0.02123364, -0.003536619, -1.39237E-05)
+###Transient Outward###
+exp_to_base_x = (-40, -30, -20, -10, 0, 10, 20, 30, 40, 50, 60, 70)
+exp_to_base_y = (0, 2.857142857, 6.571428571, 12.42857143, 19.57142857, 27.28571429, 35.57142857, 44.14285714, 52.14285714, 59.14285714, 66.28571429 ,72.14285714)
+xerr_to_base = (0, 0, 0, 1.714285714, 2.571428571, 3.142857143, 3.571428571, 4, 4.285714286, 5, 6.142857143, 6.857142857)
+norm_exp_to_base_y = (0, 0.03960396, 0.091089109, 0.172277228, 0.271287129, 0.378217822, 0.493069307, 0.611881188, 0.722772277, 0.81980198, 0.918811881, 1)
+norm_xerr_to_base = (0, 0, 0, 0.023762376, 0.035643564, 0.043564356, 0.04950495, 0.055445545, 0.059405941, 0.069306931, 0.085148515, 0.095049505)
+exp_to_ethanol_y = (0, 1.428571429, 3.428571429, 9.285714286, 16.71428571, 23.85714286, 31.57142857, 39.57142857, 47.28571429, 54.14285714, 61.14285714, 68.14285714)
+xerr_to_ethanol = (0, 0, 0, 0, 2, 2.571428571, 2.428571429, 3.714285714, 3.285714286, 4.285714286, 4.428571429, 6.714285714)
+norm_exp_to_ethanol_y = (0, 0.01980198, 0.047524752, 0.128712871, 0.231683168, 0.330693069, 0.437623762, 0.548514851, 0.655445545, 0.75049505, 0.847524752, 0.944554455)
+norm_xerr_to_ethanol = (0, 0, 0, 0, 0.027722772, 0.035643564, 0.033663366, 0.051485149, 0.045544554, 0.059405941, 0.061386139, 0.093069307)
+
+##Bebarova, 2010##
+###Sodium###
+Bebarova_exp_Na_ethanol_x = (-79.71776865, -74.71710613, -69.86352193, -64.86285941, -59.71511859, -54.86550947, -49.87809726, -44.9065854, -39.80787068, -35.00861269, -30.05565125, -25.08148933, -20.22525507, -15.05366371, -10.01192527, -5.102689811, -0.196104412, 5.153040943, 9.907247913, 15.26964357, 20.17622897)
+Bebarova_exp_Na_ethanol_y = (-0.719491189, -0.674440175, -0.630714191, -0.585663177, -0.539287134, -0.765867232, -1.621836491, -3.559030078, -6.846429045, -10.49688618, -13.69550815, -15.45249768, -15.22856764, -13.56035511, -10.72214125, -6.894130118, -3.246323042, 0.49556115, 3.781635087, 8.424539552, 12.07234663)
+Bebarova_xerr_Na_ethanol = (0.00132503, 0, -0.090102027, 0.00132503, 0, 0.00265006, -0.088776997, -0.088776997, 0, 0.00132503, 1.802040546, 2.883264873, 3.694183119, 4.053266198, 3.782960117, 3.33377501, 2.614283821, 1.980919571, 1.172651385, 0.719491189, 1.530409434)
+Bebarova_norm_exp_Na_ethanol_y = (-0.032927051, -0.03086532, -0.028864229, -0.026802498, -0.024680129, -0.035049421, -0.074222303, -0.162876721, -0.313322418, -0.480383239, -0.626766115, -0.70717361, -0.696925596, -0.620580923, -0.490691893, -0.315505427, -0.148565884, 0.022679037, 0.173064096, 0.38554363, 0.552483173)
+Bebarova_norm_xerr_Na_ethanol = (6.06391E-05, 0, -0.004123461, 6.06391E-05, 0, 0.000121278, -0.004062822, -0.004062822, 0, 6.06391E-05, 0.082469226, 0.131950761, 0.169061913, 0.185495119, 0.173124735, 0.152568067, 0.119641016, 0.090655509, 0.053665636, 0.032927051, 0.070038203)
+Bebarova_exp_Na_base_y = (-0.722141248, -0.677090235, -0.632039221, -0.49688618, -0.541937194, -0.675765205, -1.621836491, -4.009540215, -8.561017623, -14.28249636, -19.46336293, -21.85106665, -21.71591361, -19.50841394, -16.03948589, -11.75963959, -6.939181132, -1.217702398, 3.513979065, 10.67444017, 15.40479661)
+Bebarova_xerr_Na_base = (0, 0.00132503, 0, 0, 0, 0, -0.091427057, -1.172651385, -1.621836491, -0.899695243, -1.892142573, -3.692858089, -4.865509474, -5.134490526, -5.225917583, -4.593878362, -4.146018285, -3.784285146, -3.243672983, -0.899695243, -0.901020273)
+Bebarova_norm_exp_Na_base_y = (-0.033048329, -0.030986599, -0.028924868, -0.022739676, -0.024801407, -0.03092596, -0.074222303, -0.183494027, -0.391789461, -0.653629252, -0.890728276, -1, -0.993814808, -0.892790007, -0.734036747, -0.538172336, -0.317567158, -0.055727366, 0.16081499, 0.488508884, 0.704990601)
+Bebarova_norm_xerr_Na_base = (0, 6.06391E-05, 0, 0, 0, 0, -0.0041841, -0.053665636, -0.074222303, -0.041173974, -0.086592687, -0.169001273, -0.222666909, -0.234976654, -0.239160754, -0.210235886, -0.189739858, -0.173185374, -0.148444606, -0.041173974, -0.041234613)
+###Calcium###
+Bebarova_exp_Ca_base_x = (-40, -30, -20, -10, 0, 10, 20, 30, 40, 50, 60)
+Bebarova_exp_Ca_base_y = (-0.191176471, -0.544117647, -2.352941176, -5.044117647, -5.764705882, -4.808823529, -3.470588235, -2.073529412, -1, -0.220588235, 0.588235294)
+Bebarova_xerr_Ca_base = (-0.014705882, 0.014705882, -0.691176471, -1.25, -0.014705882, -0.955882353, -0.735294118, -0.455882353, -0.235294118, -0.117647059, -0.014705882)
+Bebarova_norm_exp_Ca_base_y = (-0.033163265, -0.094387755, -0.408163265, -0.875, -1, -0.834183673, -0.602040816, -0.359693878, -0.173469388, -0.038265306, 0.102040816)
+Bebarova_norm_xerr_Ca_base = (-0.00255102, 0.00255102, -0.119897959, -0.216836735, -0.00255102, -0.165816327, -0.12755102, -0.079081633, -0.040816327, -0.020408163, -0.00255102)
+Bebarova_exp_Ca_ethanol_y = (-0.161764706, -0.529411765, -2.191176471, -3.985294118, -4.294117647, -3.544117647, -2.455882353, -1.441176471, -0.661764706, -0.102941176, 0.588235294)
+Bebarova_xerr_Ca_ethanol = (-0.014705882, 0.161764706, 0.705882353, 1.147058824, 0.970588235, 0.705882353, 0.441176471, 0.294117647, 0.161764706, 0, -0.014705882)
+Bebarova_norm_exp_Ca_ethanol_y = (-0.028061224, -0.091836735, -0.380102041, -0.691326531, -0.744897959, -0.614795918, -0.426020408, -0.25, -0.114795918, -0.017857143, 0.102040816)
+Bebarova_norm_xerr_Ca_ethanol = (-0.00255102, 0.028061224, 0.12244898, 0.198979592, 0.168367347, 0.12244898, 0.076530612, 0.051020408, 0.028061224, 0, -0.00255102)
+###Transient Outward###
+Bebarova_exp_to_base_x = (-74.28571429, -59.12087912, -44.17582418, -29.45054945, -14.72527473, 0, 14.94505495, 29.67032967, 44.61538462, 59.34065934, 74.28571429)
+Bebarova_exp_to_base_y = (0.220588235, 0.294117647, 0.073529412, 0.514705882, 3.088235294, 7.352941176, 12.35294118, 17.64705882, 23.01470588, 27.72058824, 32.5)
+Bebarova_xerr_to_base = (0, 0.073529412, 0.073529412, 0, 0.661764706, 1.617647059, 2.426470588, 3.382352941, 4.264705882, 5.588235294, 6.397058824)
+Bebarova_norm_exp_to_base_y = (0.00678733, 0.009049774, 0.002262443, 0.015837104, 0.095022624, 0.226244344, 0.380090498, 0.542986425, 0.708144796, 0.852941176, 1)
+Bebarova_norm_xerr_to_base = (0, 0.002262443, 0.002262443, 0, 0.020361991, 0.049773756, 0.074660633, 0.104072398, 0.131221719, 0.171945701, 0.196832579)
+Bebarova_exp_to_ethanol_y = (0.294117647, 0.367647059, 0.588235294, 0.882352941, 2.426470588, 5.367647059, 9.264705882, 13.52941176, 18.01470588, 22.35294118, 26.61764706)
+Bebarova_xerr_to_ethanol = (0, -0.073529412, 0, 0, -0.661764706, -0.955882353, -1.617647059, -2.352941176, -3.382352941, -4.117647059, -5)
+Bebarova_norm_exp_to_ethanol_y = (0.009049774, 0.011312217, 0.018099548, 0.027149321, 0.074660633, 0.165158371, 0.285067873, 0.416289593, 0.554298643, 0.687782805, 0.819004525)
+Bebarova_norm_xerr_to_ethanol = (0, -0.002262443, 0, 0, -0.020361991, -0.029411765, -0.049773756, -0.07239819, -0.104072398, -0.126696833, -0.153846154)
+###K1###
+Bebarova_exp_K1_base_x = (-120.9302326, -110.9302326, -100.6976744, -90.69767442, -80.69767442, -70.69767442, -60.46511628, -50.46511628, -40.46511628, -30.23255814, -20.23255814, -10.23255814, 0, 10)
+Bebarova_exp_K1_base_y = (-8.676056338, -7.23943662, -5.352112676, -3.23943662, -1.23943662, 0.084507042, 0.647887324, 0.957746479, 1.014084507, 0.901408451, 0.845070423, 0.845070423, 0.901408451, 1.126760563)
+Bebarova_xerr_K1_base = (0.901408451, 0.704225352, 0.422535211, 0.197183099, 0.028169014, 0, 0.028169014, 0, 0.028169014, 0, 0.028169014, 0, 0, 0)
+Bebarova_norm_exp_K1_base_y = (-1, -0.834415584, -0.616883117, -0.373376623, -0.142857143, 0.00974026, 0.074675325, 0.11038961, 0.116883117, 0.103896104, 0.097402597, 0.097402597, 0.103896104, 0.12987013)
+Bebarova_norm_xerr_K1_base = (0.103896104, 0.081168831, 0.048701299, 0.022727273, 0.003246753, 0, 0.003246753, 0, 0.003246753, 0, 0.003246753, 0, 0, 0)
+Bebarova_exp_K1_ethanol_y = (-10.21960278, -8.650411755, -6.497981592, -3.929274988, -1.582431778, 0.042628774, 0.86129501, 1.264007751, 1.333763927, 1.180364928, 1.055708057, 1.041498466, 1.054739222, 1.235588568)
+Bebarova_xerr_K1_ethanol = (-1.110608752, -0.888745358, -0.639108671, -0.277732924, 0, 0, 0.000322945, 0, 0, 0, -0.000322945, -0.000322945, 0, 0)
+Bebarova_norm_exp_K1_ethanol_y = (-1.177908762, -0.997044212, -0.748955671, -0.452887215, -0.182390676, 0.004913381, 0.099272639, 0.145689205, 0.153729284, 0.136048555, 0.121680636, 0.120042843, 0.121568969, 0.142413617)
+Bebarova_norm_xerr_K1_ethanol = (-0.128008476, -0.102436559, -0.073663499, -0.032011425, 0, 0, 3.72226E-05, 0, 0, 0, -3.72226E-05, -3.72226E-05, 0, 0)
+###INACT Ca###
+inact_exp_Ca_base_x = (-80.18691589, -70.09345794, -59.81308411, -49.90654206, -39.62616822, -29.53271028, -19.25233645, -9.158878505, 0.934579439, 11.21495327, 21.12149533, 31.40186916)
+inact_exp_Ca_base_y = (1.015909091, 0.970454545, 0.956818182, 0.940909091, 0.884090909, 0.615909091, 0.243181818, 0.070454545, 0.038636364, 0.075, 0.131818182, 0.225)
+inact_yerr_Ca_base = (0, 0, 0, 0, 0.015909091, 0.063636364, 0.059090909, 0.015909091, 0, 0, 0, 0)
+inact_exp_Ca_ethanol_y = (0.997727273, 0.993181818, 0.990909091, 0.959090909, 0.827272727, 0.509090909, 0.179545455, 0.054545455, 0.040909091, 0.075, 0.143181818, 0.234090909)
+inact_yerr_Ca_ethanol = (0, 0, 0, 0, 0.056818182, 0.118181818, 0.059090909, 0.015909091, 0, 0, 0, 0.002272727)
+###INACT to###
+inact_exp_to_base_x = (-120, -110, -100, -90, -80.4, -70, -60, -50.4, -40.4, -30)
+inact_exp_to_base_slow_y = (0.940017778, 0.86624, 0.723128889, 0.548017778, 0.402204444, 0.288462222, 0.206684444, 0.130204444, 0.088426667, 0.057351111)
+inact_yerr_to_base_slow_y = (-0.002666667, 0, 0.032, 0.077368889, 0.101333333, 0.085333333, 0.058702222, 0.024, 0.021333333, 0.021333333)
+inact_exp_to_base_fast_y = (1.0066488888888885, 1.0049066666666664, 1.0057599999999998, 1.0066844444444443, 1.0102399999999998, 1.0111288888888887, 1.003982222222222, 0.9515733333333334, 0.5844622222222224, 0.12664888888888925)
+inact_exp_to_ethanol_slow_y = (0.969386667, 0.935573333, 0.872462222, 0.766684444, 0.612906667, 0.432462222, 0.281315556, 0.175537778, 0.11776, 0.073351111)
+inact_yerr_to_ethanol_slow_y = (0, 0.002666667, 0, 0.042666667, 0.048, 0.045297778, 0.029333333, 0.026702222, 0.002666667, 0.002631111)
+inact_exp_to_ethanol_fast_y = (1.009315555555555, 1.007573333333333, 1.008462222222222, 1.0119466666666663, 1.0076088888888886, 1.0111288888888887, 1.0040177777777777, 0.95424, 0.7284977777777779, 0.29735111111111145)
+
+## Hu et al 2011 ##
+## Kv1.5 (Kur) ##
+exp_kur_base_x = Hu_volt_steps_Kur
+exp_kur_base_y_norm = (0, 0, 0, 0, 0, 0.063627792, 0.230776734, 0.415677732, 0.56510713, 0.687875931, 0.792892675, 0.903826771, 1)
+xerr_kur_base_y_norm = (0.002958676, 0.00289365, 0.002991189, 3.25129E-05, 6.50258E-05, 6.50258E-05, 0.029586761, 0.029586761, 0.038462789, 0.06804955, 0.068082063, 0.085834119, 0.09763631)
+exp_kur_ethanol_x = Hu_volt_steps_Kur
+exp_kur_ethanol_y_norm = (0, 0, 0, 0, 0, 0.016321488, 0.100627499, 0.229313652, 0.343206425, 0.433462301, 0.53252918, 0.619826381, 0.692297688)
+xerr_kur_ethanol_y_norm = (3.25129E-05, 0.002958676, 0.002926163, 0.002926163, 0.002958676, 0, 0, 0.023669409, 0.029586761, 0.032512924, 0.035536626, 0.041453978, 0.059206034)
+
+################################Protocol definition###########################
+def runProtocol_Na(m, steps, hold, tpre, ttest, tpost, drug):
+    p = myokit.pacing.constant(-90)
+    s = myokit.Simulation(m, p)
+    s.set_constant('parameters.K_o', 5.4)
+    s.set_constant('parameters.Na_o', 10) #136)
+    s.set_constant('parameters.Ca_o', 1)
+    s.set_constant('membrane.T', 295)
+    #s.set_constant("intracellular_ion_concentrations.Na_i", 50)
+    
+    ina = drug**3.1 / (drug**3.1 + 446**3.1)
+    
+    s.set_constant('parameters.INa_Block_ethanol', ina)
+    s.set_tolerance(1e-8, 1e-8)
+    
+    p = myokit.pacing.steptrain(vsteps=steps, vhold=hold, tpre=tpre, tstep=ttest, tpost=tpost)
+    t = p.characteristic_time()
+    s.set_protocol(p)
+    s.pre(1000)
+    
+    d = s.run(t, log=['environment.time', 'membrane.V', 'fast_sodium_current.i_Na'])
+    ds = d.split_periodic((tpre+ttest+tpost), adjust=True)
+    
+    ss_peak = np.zeros(len(steps))
+    for k, ditem in enumerate (ds):
+        pl.figure("Voltage_Na")
+        pl.subplot(2,1,1)
+        pl.plot(ditem['environment.time'], ditem['membrane.V'])
+        pl.subplot(2,1,2)
+        pl.plot(ditem['environment.time'], ditem['fast_sodium_current.i_Na'])
+        pl.show()
+        ditem = ditem.trim_right(tpre+ttest-1)
+        minval = np.min(ditem['fast_sodium_current.i_Na'])
+        maxval = np.max(ditem['fast_sodium_current.i_Na'])   
+        ss_peak[k] = minval - maxval 
+        if maxval > 1:
+            ss_peak[k] = maxval - minval        
+        #ss_peak[k] = np.min(ditem['fast_sodium_current.i_Na'])
+
+    return ds, ss_peak
+
+################################Protocol definition###########################
+def runProtocol_Ca(m, steps, hold, tpre, ttest, tpost, drug):
+    p = myokit.pacing.constant(-90)
+    s = myokit.Simulation(m, p)
+    s.set_constant('parameters.K_o', 5.4)
+    s.set_constant('parameters.Na_o', 136)
+    s.set_constant('parameters.Ca_o', 1.8)
+    s.set_constant('membrane.T', 310)
+
+    ical = drug**1.1 / (drug**1.1 + 553**1.1) 
+    s.set_constant('parameters.ICaL_Block_ethanol', ical)
+
+    p = myokit.pacing.steptrain(vsteps=steps, vhold=hold, tpre=tpre, tstep=ttest, tpost=tpost)
+    t = p.characteristic_time()
+    s.set_protocol(p)    
+    s.pre(1000)
+    
+    d = s.run(t, log=['environment.time', 'membrane.V', 'L_type_Ca_channel.i_Ca_L'])
+    ds = d.split_periodic((tpre+ttest+tpost), adjust=True)
+    
+    ss_peak = np.zeros(len(steps))
+    for k, ditem in enumerate (ds):
+        pl.figure("Voltage_Ca")
+        pl.subplot(2,1,1)
+        pl.plot(ditem['environment.time'], ditem['membrane.V'])
+        pl.subplot(2,1,2)
+        pl.plot(ditem['environment.time'], ditem['L_type_Ca_channel.i_Ca_L'])
+        pl.show()
+        ditem = ditem.trim_right(tpost+50)
+        minval = np.min(ditem['L_type_Ca_channel.i_Ca_L'])
+        maxval = np.max(ditem['L_type_Ca_channel.i_Ca_L'])   
+        ss_peak[k] = minval - maxval 
+        if maxval > 1:
+            ss_peak[k] = maxval - minval        
+        #ss_peak[k] = np.min(ditem['L_type_Ca_channel.i_Ca_L'])
+
+    return ds, ss_peak
+
+################################Protocol definition###########################
+def runProtocol_Ca_Bebarova(m, steps, hold, prepulse, tprepulse, tpre, ttest, tpost, drug):
+    p = myokit.Protocol()
+    for it in steps:
+        p.add_step(hold, tpre)
+        p.add_step(prepulse, tprepulse)
+        p.add_step(it, ttest)
+        p.add_step(hold, tpost)
+    t = p.characteristic_time()
+    
+    s = myokit.Simulation(m, p)
+    s.set_constant('parameters.K_o', 5.4)
+    s.set_constant('parameters.Na_o', 135)
+    s.set_constant('parameters.Ca_o', 0.9)
+    s.set_constant('membrane.T', 310)
+
+    #ical = drug**1.1 / (drug**1.1 + 553**1.1) 
+    ical = drug**1.3 / (drug**1.3 + 600**1.3) 
+    s.set_constant('parameters.ICaL_Block_ethanol', ical)
+    
+    s.pre(1000)
+    
+    d = s.run(t, log=['environment.time', 'membrane.V', 'L_type_Ca_channel.i_Ca_L'])
+    d.time()
+    ds = d.split_periodic((tpre+tprepulse+ttest+tpost), adjust=True)
+    
+    ss_peak = np.zeros(len(steps))
+    tau_s = np.zeros(len(steps))
+    tau_f = np.zeros(len(steps))
+    Ratio = np.zeros(len(steps))      
+    for k, ditem in enumerate (ds):
+        pl.figure("Voltage_Ca_Bebarova")
+        pl.subplot(3,1,1)
+        pl.plot(ditem['environment.time'], ditem['membrane.V'])
+        pl.subplot(3,1,2)
+        pl.plot(ditem['environment.time'], ditem['L_type_Ca_channel.i_Ca_L'])
+        ditem = ditem.trim(tpre+tprepulse, tpre+tprepulse+240, True)
+        #ditem = ditem.trim_right(tpost+50)
+        ss_peak[k] = np.min(ditem['L_type_Ca_channel.i_Ca_L'])
+        peak_index = np.argmin(ditem['L_type_Ca_channel.i_Ca_L'])
+        ditem = ditem.trim_left(ditem['environment.time'][peak_index], True)
+        p0 = (-4, 10, -1, 100)  
+        par_opt, par_cov = curve_fit(func_tauCa, ditem['environment.time'], ditem['L_type_Ca_channel.i_Ca_L'], p0 = p0, maxfev=3000)
+        tau_s[k] = par_opt[3]
+        tau_f[k] = par_opt[1]
+        Ratio[k] = par_opt[0] / (par_opt[0]+par_opt[2])
+        pl.subplot(3,1,3)
+        pl.plot(ditem['environment.time'], ditem['L_type_Ca_channel.i_Ca_L'], '.', ditem['environment.time'], np.asarray(func_tauCa(np.asarray(ditem['environment.time']), *par_opt)), '-')
+        pl.show()
+
+    return ds, ss_peak, tau_s, tau_f, Ratio
+
+################################Protocol definition###########################
+def runProtocol_to(m, steps, hold, prepulse, tprepulse, tpre, ttest, tpost, drug):
+    p = myokit.Protocol()
+    for it in steps:
+        p.add_step(hold, tpre)
+        p.add_step(prepulse, tprepulse)
+        p.add_step(it, ttest)
+        p.add_step(hold, tpost)
+    t = p.characteristic_time()
+    
+    s = myokit.Simulation(m, p)
+    s.set_constant('parameters.K_o', 5.4)
+    s.set_constant('parameters.Na_o', 136)
+    s.set_constant('parameters.Ca_o', 1.8)
+    s.set_constant('membrane.T', 310)
+
+    #ito = drug**0.9 / (drug**0.9 + 1954**0.9)
+    #ito = drug**1.0 / (drug**1.0 + 2188**1.0)
+    ito = drug**1.1 / (drug**1.1 + 2188**1.1)
+    s.set_constant('parameters.Ito_Block_ethanol', ito)
+    
+    s.pre(1000)
+    
+    d = s.run(t, log=['environment.time', 'membrane.V', 'transient_outward_K_current.i_to'])
+    d.time()
+    ds = d.split_periodic((tpre+tprepulse+ttest+tpost), adjust=True)
+    
+    ss_peak = np.zeros(len(steps))
+    tau_s = np.zeros(len(steps))
+    tau_f = np.zeros(len(steps))
+    Ratio = np.zeros(len(steps))      
+    for k, ditem in enumerate (ds):
+        pl.figure("Voltage_to")
+        pl.subplot(3,1,1)
+        pl.plot(ditem['environment.time'], ditem['membrane.V'])
+        pl.subplot(3,1,2)
+        pl.plot(ditem['environment.time'], ditem['transient_outward_K_current.i_to'])
+        ditem = ditem.trim_left(tpre+tprepulse, True)
+        ss_peak[k] = np.max(ditem['transient_outward_K_current.i_to'])
+        peak_index = np.argmax(ditem['transient_outward_K_current.i_to'])
+        ditem = ditem.trim_left(ditem['environment.time'][peak_index], True)
+        p0 = (-4, 10, -1, 100)  
+        par_opt, par_cov = curve_fit(func_tauto, ditem['environment.time'], ditem['transient_outward_K_current.i_to'], p0 = p0, maxfev=3000)
+        tau_s[k] = par_opt[3]
+        tau_f[k] = par_opt[1]
+        Ratio[k] = par_opt[0] / (par_opt[0]+par_opt[2])
+        pl.subplot(3,1,3)
+        pl.plot(ditem['environment.time'], ditem['transient_outward_K_current.i_to'], '.', ditem['environment.time'], np.asarray(func_tauto(np.asarray(ditem['environment.time']), *par_opt)), '-')
+        pl.show()
+        
+    return ds, ss_peak, tau_s, tau_f, Ratio
+
+################################Protocol definition###########################
+def runProtocol_K1(m, steps, drug):
+    p = myokit.Protocol()
+    for it in steps:
+        p.add_step(-75, 50)
+        p.add_step(-40, 15)
+        p.add_step(it, 500)
+        p.add_step(-75, 4435)
+    t = p.characteristic_time()
+    
+    s = myokit.Simulation(m, p)
+    s.set_constant('parameters.K_o', 5.4)
+    s.set_constant('parameters.Na_o', 135)
+    s.set_constant('parameters.Ca_o', 0.9)
+    s.set_constant('membrane.T', 295)
+
+    #ik1 = (0.08*drug**3 / (drug**3 + 0.263**3)) + (0.29*drug**1.8 / (drug**1.8 + 4.365**1.8))
+    ik1 = (0.0919*drug**3 / (drug**3 + 0.1854**3)) - (0.3112*drug**1.8 / (drug**1.8 + 7.461**1.8))
+    s.set_constant('parameters.IK1_Block_ethanol', ik1)
+    
+    s.pre(1000)
+    
+    d = s.run(t, log=['environment.time', 'membrane.V', 'time_independent_potassium_current.i_K1'])
+    d.time()
+    ds = d.split_periodic((5000), adjust=True)
+    
+    ss_peak = np.zeros(len(steps))
+    for k, ditem in enumerate (ds):
+        pl.figure("Voltage_K1")
+        pl.subplot(2,1,1)
+        pl.plot(ditem['environment.time'], ditem['membrane.V'])
+        pl.subplot(2,1,2)
+        pl.plot(ditem['environment.time'], ditem['time_independent_potassium_current.i_K1'])
+        pl.show()
+        ditem = ditem.trim_left(65, True)
+        ss_peak[k] = np.min(ditem['time_independent_potassium_current.i_K1'])
+
+    return ds, ss_peak
+
+################################Protocol definition###########################
+def runProtocol_Ca_Bebarova_inact(m, steps, hold, test, tpre, tprepulse, ttest, tpost, drug):
+    p = myokit.Protocol()
+    for it in steps:
+        p.add_step(hold, tpre)
+        p.add_step(it, tprepulse)
+        p.add_step(test, ttest)
+        p.add_step(hold, tpost)
+    t = p.characteristic_time()
+    
+    s = myokit.Simulation(m, p)
+    s.set_constant('parameters.K_o', 5.4)
+    s.set_constant('parameters.Na_o', 135)
+    s.set_constant('parameters.Ca_o', 0.9)
+    s.set_constant('membrane.T', 310)
+
+    #ical = drug**1.1 / (drug**1.1 + 553**1.1) 
+    ical = drug**1.3 / (drug**1.3 + 600**1.3) 
+    s.set_constant('parameters.ICaL_Block_ethanol', ical)
+    
+    s.pre(1000)
+    
+    d = s.run(t, log=['environment.time', 'membrane.V', 'L_type_Ca_channel.i_Ca_L'])
+    d.time()
+    ds = d.split_periodic((tpre+tprepulse+ttest+tpost), adjust=True)
+    
+    ss_peak = np.zeros(len(steps))
+    for k, ditem in enumerate (ds):
+        pl.figure("Voltage_Ca_Bebarova_inact")
+        pl.subplot(2,1,1)
+        pl.plot(ditem['environment.time'], ditem['membrane.V'])
+        pl.subplot(2,1,2)
+        pl.plot(ditem['environment.time'], ditem['L_type_Ca_channel.i_Ca_L'])
+        pl.show()
+        ditem = ditem.trim(tpre+tprepulse+0.1, tpre+tprepulse+200, True)
+        #ditem = ditem.trim_right(tpost+50)
+        ss_peak[k] = np.min(ditem['L_type_Ca_channel.i_Ca_L'])
+
+    return ds, ss_peak
+
+################################Protocol definition###########################
+def runProtocol_to_inact(m, steps, hold, pulse1, pulse2, tpre, tpulse1, tpulse, tpulse2, tpost, drug):
+    p = myokit.Protocol()
+    for it in steps:
+        p.add_step(hold, tpre)
+        p.add_step(pulse1, tpulse1)
+        p.add_step(it, tpulse)
+        p.add_step(pulse2, tpulse2)
+        p.add_step(hold, tpost)
+    t = p.characteristic_time()
+    
+    s = myokit.Simulation(m, p)
+    s.set_constant('parameters.K_o', 5.4)
+    s.set_constant('parameters.Na_o', 136)
+    s.set_constant('parameters.Ca_o', 1.8)
+    s.set_constant('membrane.T', 310)
+
+    #ito = drug**0.9 / (drug**0.9 + 1954**0.9)
+    #ito = drug**1.0 / (drug**1.0 + 2188**1.0)
+    ito = drug**1.1 / (drug**1.1 + 2188**1.1)    
+    s.set_constant('parameters.Ito_Block_ethanol', ito)
+    
+    s.pre(1000)
+    
+    d = s.run(t, log=['environment.time', 'membrane.V', 'transient_outward_K_current.i_to'])
+    d.time()
+    ds = d.split_periodic((tpre+tpulse1+tpulse+tpulse2+tpost), adjust=True)
+    
+    ss_peak = np.zeros(len(steps))
+    for k, ditem in enumerate (ds):
+        pl.figure("Voltage_to_inact")
+        pl.subplot(2,1,1)
+        pl.plot(ditem['environment.time'], ditem['membrane.V'])
+        pl.subplot(2,1,2)
+        pl.plot(ditem['environment.time'], ditem['transient_outward_K_current.i_to'])
+        pl.show()
+        ditem = ditem.trim_left(tpre+tpulse1+tpulse, True)
+        ss_peak[k] = np.max(ditem['transient_outward_K_current.i_to'])
+
+    return ds, ss_peak
+################################Protocol definition###########################
+def runProtocolKur(m, steps, drug):
+    p = myokit.Protocol()
+    for it in steps:
+        p.add_step(-80, 50)
+        p.add_step(it, 250)
+        p.add_step(-50, 50)
+        p.add_step(-80,50)
+    t = p.characteristic_time()    
+
+    s = myokit.Simulation(m, p)
+    s.set_constant('parameters.K_o', 5.0)
+    s.set_constant('parameters.Na_o', 140)
+    s.set_constant('parameters.Ca_o', 1.0)
+    s.set_constant('membrane.T', 310)
+
+    #ikur = 1-(1/(1 + ((drug**0.6437)/(494.6**0.6437)))) 
+    ikur = drug**0.6437 / (drug**0.6437 + 494.6**0.6437)   
+    s.set_constant('parameters.IKur_Block_ethanol', ikur)
+
+    d = s.run(t, log=['environment.time', 'membrane.V', 'ultrarapid_delayed_rectifier_K_current.i_Kur'])
+    d.time()
+    ds = d.split_periodic((400), adjust=True)
+
+    ss_peak = np.zeros(len(steps))    
+    for k, ditem in enumerate (ds):
+        pl.figure("Voltage_kur")
+        pl.subplot(2,1,1)
+        pl.plot(ditem['environment.time'], ditem['membrane.V'])
+        pl.subplot(2,1,2)
+        pl.plot(ditem['environment.time'], ditem['ultrarapid_delayed_rectifier_K_current.i_Kur'])
+        ditem = ditem.trim_left(250, True)
+        ss_peak[k] = np.max(ditem['ultrarapid_delayed_rectifier_K_current.i_Kur'])
+        pl.show()
+        
+    return ds, ss_peak
+################################Protocol definition###########################
+def runProtocolKAch(m, drug):
+    p = myokit.Protocol()
+    p.add_step(-85, 20)
+    p.add_step(-50, 100)
+    p.add_step(-110, 500)
+    p.add_step(-85,30)
+    t = p.characteristic_time()    
+
+    s = myokit.Simulation(m, p)
+    s.set_constant('parameters.K_o', 5.4)
+    s.set_constant('parameters.Na_o', 135)
+    s.set_constant('parameters.Ca_o', 0.9)
+    s.set_constant('membrane.T', 295)
+ 
+    ikach = (0.0906*drug**8.281 / (drug**8.281 + 0.7442**8.281)) - (0.2651*drug**4.064 / (drug**4.064 + 9.186**4.064))
+    #ikach = (0.08319*drug**11.54 / (drug**11.54 + 0.7374**11.54)) - (0.5868*drug**6.773 / (drug**6.773 + 10.33**6.773))
+    s.set_constant('parameters.IKAch_Block_ethanol', ikach)
+
+    d = s.run(t, log=['environment.time', 'membrane.V', 'I_KACh.IKACh'])
+    d.time()
+    ds = d.trim_left(110, True)
+    ss_peak = np.max(ds['I_KACh.IKACh'])
+    dss = ds.trim_left(500, True)
+    ss_peak_2 = np.max(dss['I_KACh.IKACh'])
+
+    pl.figure("Voltage_kach")
+    pl.subplot(2,1,1)
+    pl.plot(d['environment.time'], d['membrane.V'])
+    pl.subplot(2,1,2)
+    pl.plot(d['environment.time'], d['I_KACh.IKACh'])
+    pl.show()
+        
+    return d, ss_peak, ss_peak_2
+
+################################Protocol definition###########################
+def runProtocolKr(m, steps, drug):
+    p = myokit.Protocol()
+    for it in steps:
+        p.add_step(-80, 50)
+        p.add_step(it, 2000)
+        p.add_step(-50, 4000)
+        p.add_step(-80,50)
+    t = p.characteristic_time()    
+
+    s = myokit.Simulation(m, p)
+    s.set_constant('parameters.K_o', 4.0) #2.0)
+    s.set_constant('parameters.Na_o', 146) #136)
+    s.set_constant('parameters.Ca_o', 2.0) #1.0)
+    s.set_constant('membrane.T', 296) #298)
+
+    #ikr = drug**0.99 / (drug**0.99 + 230**0.99) 
+    ikr = drug**0.99 / (drug**0.99 + 608**0.99) ### Himmel 2007
+    s.set_constant('parameters.IKr_Block_ethanol', ikr)
+
+    d = s.run(t, log=['environment.time', 'membrane.V', 'rapid_delayed_rectifier_K_current.i_Kr'])
+    d.time()
+    ds = d.split_periodic((6100), adjust=True)
+
+    ss_peak = np.zeros(len(steps))    
+    for k, ditem in enumerate (ds):
+        pl.figure("Voltage_kr")
+        pl.subplot(2,1,1)
+        pl.plot(ditem['environment.time'], ditem['membrane.V'])
+        pl.subplot(2,1,2)
+        pl.plot(ditem['environment.time'], ditem['rapid_delayed_rectifier_K_current.i_Kr'])
+        ditem = ditem.trim_right(2000)
+        ss_peak[k] = np.max(ditem['rapid_delayed_rectifier_K_current.i_Kr'])
+        pl.show()
+        
+    return ds, ss_peak
+    
+#####################################################################
+def runProtocol_SRleak(m, drug):
+    steps = [10 for x in range(200)]
+    ina = drug**3.1 / (drug**3.1 + 446**3.1)
+    ical = drug**1.3 / (drug**1.3 + 600**1.3) 
+    ito = drug**1.1 / (drug**1.1 + 2188**1.1)   
+    #ikr = drug**0.99 / (drug**0.99 + 230**0.99)
+    ikr = drug**0.99 / (drug**0.99 + 608**0.99) ### Himmel 2007
+    ik1 = (0.0919*drug**3 / (drug**3 + 0.1854**3)) - (0.3112*drug**1.8 / (drug**1.8 + 7.461**1.8)) 
+    ikur = drug**0.6437 / (drug**0.6437 + 494.6**0.6437) 
+    ikach = (0.0906*drug**8.281 / (drug**8.281 + 0.7442**8.281)) - (0.2651*drug**4.064 / (drug**4.064 + 9.186**4.064))
+    #ileak = 1 + (drug**2.282)*1.238/(drug**2.282 + 35.32**2.282) ## based on murine ventricular CM #Mustroph JMCC 2018
+    ileak = 1 + (drug**1.088)*1.067/(drug**1.088 + 16.43**1.088) ## based on murine atrial CM #Mustroph JMCC 2018
+    incx = 1 + (drug**1.088)*1.067/(drug**1.088 + 16.43**1.088) ## Mustroph JMCC 2018
+    
+    p = myokit.pacing.steptrain(
+        vsteps= steps,
+        vhold = -80,   
+        tpre  = 100,   
+        tstep = 100,   
+        tpost = 800
+        )
+    t = p.characteristic_time()
+    p_const = myokit.pacing.constant(-80)
+    
+    s = myokit.Simulation(m, p)
+    s.set_constant('parameters.K_o', 4)
+    s.set_constant('parameters.Na_o', 140)
+    s.set_constant('parameters.Ca_o', 2)
+    s.set_constant('membrane.T', 310)
+    s.set_constant('parameters.Ito_Block_ethanol', ito)
+    s.set_constant('parameters.IK1_Block_ethanol', ik1)
+    s.set_constant('parameters.INa_Block_ethanol', ina)  
+    s.set_constant('parameters.ICaL_Block_ethanol', ical) 
+    s.set_constant('parameters.IKr_Block_ethanol', ikr) 
+    s.set_constant('parameters.IKur_Block_ethanol', ikur) 
+    s.set_constant('parameters.IKAch_Block_ethanol', ikach)
+    s.set_constant('parameters.Ileak_Factor_ethanol', ileak)
+    s.set_constant('parameters.INCX_Factor_ethanol', incx)    
+    s.set_tolerance(1e-8, 1e-8)
+    #s.set_constant('parameters.AF', 0)
+    s.pre(t-3000)
+    d = s.run(3000, log=['environment.time', 'membrane.V', 'L_type_Ca_channel.i_Ca_L', 'output.Cai', 'Na_Ca_exchanger_current.i_NaCa', 'membrane.I_ion'])
+    
+    s.set_protocol(p_const) # PRE_TETRACAINE PROTOCOL
+    s.set_constant('parameters.Na_o', 1e-11)
+    s.set_constant('parameters.Ca_o', 1e-11)
+    s.set_constant('parameters.tetracaine_factor', 0.0)
+    s.set_constant('parameters.caffeine_factor', 0.0)
+    d = s.run(2500, log=d)
+    dt1 = d.trim(3000, 5490, adjust=True)
+    min_val_stim = np.min(dt1['output.Cai'])
+    
+    s.set_protocol(p_const) # TETRACAINE PROTOCOL 
+    s.set_constant('parameters.Na_o', 1e-11)
+    s.set_constant('parameters.Ca_o', 1e-11)
+    s.set_constant('parameters.tetracaine_factor', 1.0)
+    s.set_constant('parameters.caffeine_factor', 0.0)
+    d = s.run(4000, log=d)
+    dt2 = d.trim(5500, 9450, adjust=True)
+    min_val_tetracaine = np.min(dt2['output.Cai'])
+
+    #pl.figure("sr leak")
+    #pl.subplot(2,1,1)
+    #pl.plot(dt1['environment.time'], dt1['output.Cai'])
+    #pl.subplot(2,1,2)
+    #pl.plot(dt2['environment.time'], dt2['output.Cai'])
+    #pl.show()
+    
+    s.set_protocol(p_const) # PRE_CAFFEINE PROTOCOL 
+    s.set_constant('parameters.Na_o', 1e-11)
+    s.set_constant('parameters.Ca_o', 1e-11)    
+    s.set_constant('parameters.tetracaine_factor', 0.0)
+    s.set_constant('parameters.caffeine_factor', 0.0)
+    d = s.run(500, log=d)
+        
+    s.set_protocol(p_const) # CAFFEINE PROTOCOL
+    s.set_constant('parameters.Na_o', 140) #1e-11)
+    s.set_constant('parameters.Ca_o', 2) #1e-11)    
+    s.set_constant('parameters.tetracaine_factor', 0.0)
+    s.set_constant('parameters.caffeine_factor', 1.0)
+    s.set_constant('parameters.JsercaB', 1.0)
+    d = s.run(10000, log=d)
+
+    leak = abs(min_val_stim - min_val_tetracaine)
+    
+    print "max = " + np.str(min_val_stim) + ", " + "min = " + np.str(min_val_tetracaine) + ", " + "Ileak_Factor = " + np.str(ileak)
+    
+    return d, leak
+
+#####################################################################
+def runProtocol_caffeine(m, drug):
+    steps = [10 for x in range(200)]
+    
+    ina = drug**3.1 / (drug**3.1 + 446**3.1)
+    ical = drug**1.3 / (drug**1.3 + 600**1.3) 
+    ito = drug**1.1 / (drug**1.1 + 2188**1.1)   
+    #ikr = drug**0.99 / (drug**0.99 + 230**0.99)
+    ikr = drug**0.99 / (drug**0.99 + 608**0.99) ### Himmel 2007
+    ik1 = (0.0919*drug**3 / (drug**3 + 0.1854**3)) - (0.3112*drug**1.8 / (drug**1.8 + 7.461**1.8)) 
+    ikur = drug**0.6437 / (drug**0.6437 + 494.6**0.6437) 
+    ikach = (0.0906*drug**8.281 / (drug**8.281 + 0.7442**8.281)) - (0.2651*drug**4.064 / (drug**4.064 + 9.186**4.064))
+    #ileak = 1 + (drug**2.282)*1.238/(drug**2.282 + 35.32**2.282) ## based on murine ventricular CM #Mustroph JMCC 2018
+    ileak = 1 + (drug**1.088)*1.067/(drug**1.088 + 16.43**1.088) ## based on murine atrial CM #Mustroph JMCC 2018
+    incx = 1 + (drug**1.088)*1.067/(drug**1.088 + 16.43**1.088) ## Mustroph JMCC 2018
+    
+    p = myokit.pacing.steptrain(
+        vsteps= steps,
+        vhold = -80,   
+        tpre  = 100,   
+        tstep = 100,   
+        tpost = 800
+        )
+    t = p.characteristic_time()
+    p_const = myokit.pacing.constant(-80)
+    
+    s = myokit.Simulation(m, p)
+    s.set_constant('parameters.K_o', 4)
+    s.set_constant('parameters.Na_o', 140)
+    s.set_constant('parameters.Ca_o', 2)
+    s.set_constant('membrane.T', 310)
+    s.set_constant('parameters.Ito_Block_ethanol', ito)
+    s.set_constant('parameters.IK1_Block_ethanol', ik1)
+    s.set_constant('parameters.INa_Block_ethanol', ina)  
+    s.set_constant('parameters.ICaL_Block_ethanol', ical) 
+    s.set_constant('parameters.IKr_Block_ethanol', ikr) 
+    s.set_constant('parameters.IKur_Block_ethanol', ikur) 
+    s.set_constant('parameters.IKAch_Block_ethanol', ikach)
+    s.set_constant('parameters.Ileak_Factor_ethanol', ileak)
+    s.set_constant('parameters.INCX_Factor_ethanol', incx)    
+    s.set_tolerance(1e-8, 1e-8)
+    #s.set_constant('parameters.AF', 0)
+    s.pre(t-3000)
+    d = s.run(3000, log=['environment.time', 'membrane.V', 'L_type_Ca_channel.i_Ca_L', 'output.Cai', 'Na_Ca_exchanger_current.i_NaCa', 'membrane.I_ion'])
+        
+    s.set_protocol(p_const) # PRE_CAFFEINE PROTOCOL 
+    s.set_constant('parameters.Na_o', 140)
+    s.set_constant('parameters.Ca_o', 2)    
+    s.set_constant('parameters.tetracaine_factor', 0.0)
+    s.set_constant('parameters.caffeine_factor', 0.0)
+    d = s.run(500, log=d)
+        
+    s.set_protocol(p_const) # CAFFEINE PROTOCOL
+    s.set_constant('parameters.Na_o', 140)
+    s.set_constant('parameters.Ca_o', 2)    
+    s.set_constant('parameters.tetracaine_factor', 0.0)
+    s.set_constant('parameters.caffeine_factor', 1.0)
+    s.set_constant('parameters.JsercaB', 1.0)
+    d = s.run(10000, log=d)
+    
+    dt = d.trim_left(3700, True)
+    dt = dt.trim_right(5000)
+    p0 = (1.4, 1000, 0.18)
+    par_opt, par_cov = curve_fit(func_taucaff, dt['environment.time'], dt['output.Cai'], p0=p0, maxfev=3000)
+    tau = par_opt[1]
+    pl.figure("caff_curve_fit")
+    pl.plot(dt['environment.time'], dt['output.Cai'], '.', dt['environment.time'], np.asarray(func_taucaff(np.asarray(dt['environment.time']), *par_opt)), '-')
+    pl.show()
+
+    print tau
+            
+    return d
+
+#####################################################################
+
+Bebarova_datalog_base_Na, Bebarova_peak_ss_Na = runProtocol_Na(m, Bebarova_volt_steps_Na, -75, 50, 25, 4925, 0)
+Bebarova_datalog_ethanol_Na, Bebarova_peak_ss_Na_ethanol = runProtocol_Na(m, Bebarova_volt_steps_Na, -75, 50, 25, 4925, 340)
+Bebarova_datalog_base_Ca, Bebarova_peak_ss_Ca, Bebarova_taus_Ca, Bebarova_tauf_Ca, Bebarova_ratio_Ca = runProtocol_Ca_Bebarova(m, Bebarova_volt_steps_Ca, -80, -40, 50, 50, 250, 4650, 0)
+Bebarova_datalog_ethanol_Ca, Bebarova_peak_ss_Ca_ethanol, Bebarova_taus_Ca_ethanol, Bebarova_tauf_Ca_ethanol, Bebarova_ratio_Ca_ethanol = runProtocol_Ca_Bebarova(m, Bebarova_volt_steps_Ca, -80, -40, 50, 50, 250, 4650, 340)
+Bebarova_datalog_base_to, Bebarova_peak_ss_to, Bebarova_taus_to, Bebarova_tauf_to, Bebarova_ratio_to = runProtocol_to(m, Bebarova_volt_steps_to, -75, -40, 15, 50, 500, 4435, 0)
+Bebarova_datalog_ethanol_to, Bebarova_peak_ss_to_ethanol, Bebarova_taus_to_ethanol, Bebarova_tauf_to_ethanol, Bebarova_ratio_to_ethanol = runProtocol_to(m, Bebarova_volt_steps_to, -75, -40, 15, 50, 500, 4435, 800)
+Bebarova_datalog_base_K1, Bebarova_peak_ss_K1 = runProtocol_K1(m, Bebarova_volt_steps_K1, 0)
+Bebarova_datalog_ethanol_K1, Bebarova_peak_ss_K1_ethanol = runProtocol_K1(m, Bebarova_volt_steps_K1, 80)
+
+Bebarova_datalog_base_Ca_inact, Bebarova_peak_ss_Ca_inact = runProtocol_Ca_Bebarova_inact(m, Bebarova_volt_steps_Ca_inact, -80, 0.0, 50, 250, 250, 4450, 0)
+Bebarova_datalog_ethanol_Ca_inact, Bebarova_peak_ss_Ca_ethanol_inact = runProtocol_Ca_Bebarova_inact(m, Bebarova_volt_steps_Ca_inact, -80, 0.0, 50, 250, 250, 4450, 340)
+Bebarova_datalog_base_to_inact, Bebarova_peak_ss_to_inact = runProtocol_to_inact(m, Bebarova_volt_steps_to_inact, -80, 40, 40, 50, 500, 1000, 500, 7950, 0)
+Bebarova_datalog_ethanol_to_inact, Bebarova_peak_ss_to_ethanol_inact = runProtocol_to_inact(m, Bebarova_volt_steps_to_inact, -80, 40, 40, 50, 500, 1000, 500, 7950, 800)
+
+Hu_datalog_base_Kur, Hu_peak_ss_base_Kur = runProtocolKur(m, Hu_volt_steps_Kur, 0)
+Hu_datalog_ethanol_Kur, Hu_peak_ss_ethanol_Kur = runProtocolKur(m, Hu_volt_steps_Kur, 200)
+
+Bebarova_datalog_base_KAch, Bebarova_peak_min50_KAch, Bebarova_peak_min110_KAch = runProtocolKAch(m, 0)
+Bebarova_datalog_ethanol_KAch, Bebarova_peak_min50_KAch_ethanol, Bebarova_peak_min110_KAch_ethanol = runProtocolKAch(m, 20)
+
+Oleary_Yang_datalog_base_Kr, Oleary_Yang_peak_ss_base_Kr = runProtocolKr(m, Oleary_yang_volt_steps, 0)
+Oleary_Yang_datalog_ethanol_Kr_20, Oleary_Yang_peak_ss_ethanol_Kr_20 = runProtocolKr(m, Oleary_yang_volt_steps, 20)
+Oleary_Yang_datalog_ethanol_Kr_200, Oleary_Yang_peak_ss_ethanol_Kr_200 = runProtocolKr(m, Oleary_yang_volt_steps, 200)
+Oleary_Yang_datalog_ethanol_Kr_1000, Oleary_Yang_peak_ss_ethanol_Kr_1000 = runProtocolKr(m, Oleary_yang_volt_steps, 1000)
+
+Bebarova_norm_peak_ss_Na = -(Bebarova_peak_ss_Na / np.min(Bebarova_peak_ss_Na))
+Bebarova_norm_peak_ss_Na_ethanol = -(Bebarova_peak_ss_Na_ethanol / np.min(Bebarova_peak_ss_Na))
+#Bebarova_norm_peak_ss_Ca = Bebarova_peak_ss_Ca / np.max(np.abs(Bebarova_peak_ss_Ca))
+#Bebarova_norm_peak_ss_Ca_ethanol = Bebarova_peak_ss_Ca_ethanol / np.max(np.abs(Bebarova_peak_ss_Ca))
+Bebarova_norm_peak_ss_Ca = Bebarova_peak_ss_Ca / np.abs(Bebarova_peak_ss_Ca[4])
+Bebarova_norm_peak_ss_Ca_ethanol = Bebarova_peak_ss_Ca_ethanol / np.abs(Bebarova_peak_ss_Ca[4])
+Bebarova_norm_peak_ss_to = Bebarova_peak_ss_to / np.max(np.abs(Bebarova_peak_ss_to))
+Bebarova_norm_peak_ss_to_ethanol = Bebarova_peak_ss_to_ethanol / np.max(np.abs(Bebarova_peak_ss_to))
+Bebarova_norm_peak_ss_K1 = Bebarova_peak_ss_K1 / np.max(np.abs(Bebarova_peak_ss_K1))
+Bebarova_norm_peak_ss_K1_ethanol = Bebarova_peak_ss_K1_ethanol / np.max(np.abs(Bebarova_peak_ss_K1))
+
+Bebarova_norm_peak_ss_Ca_inact = Bebarova_peak_ss_Ca_inact / (Bebarova_peak_ss_Ca_inact[1])
+Bebarova_norm_peak_ss_Ca_ethanol_inact = Bebarova_peak_ss_Ca_ethanol_inact / (Bebarova_peak_ss_Ca_ethanol_inact[1])
+Bebarova_norm_peak_ss_to_inact = Bebarova_peak_ss_to_inact / (Bebarova_peak_ss_to_inact[0])
+Bebarova_norm_peak_ss_to_ethanol_inact = Bebarova_peak_ss_to_ethanol_inact / (Bebarova_peak_ss_to_ethanol_inact[0])
+
+Hu_norm_peak_ss_base_Kur = Hu_peak_ss_base_Kur / np.max(np.abs(Hu_peak_ss_base_Kur))
+Hu_norm_peak_ss_ethanol_Kur = Hu_peak_ss_ethanol_Kur / np.max(np.abs(Hu_peak_ss_base_Kur))
+
+Bebarova_norm_peak_min50_KAch = Bebarova_peak_min50_KAch / Bebarova_peak_min50_KAch
+Bebarova_norm_peak_min50_KAch_ethanol = Bebarova_peak_min50_KAch_ethanol / Bebarova_peak_min50_KAch
+Bebarova_norm_peak_min110_KAch = -(Bebarova_peak_min110_KAch / Bebarova_peak_min110_KAch)
+Bebarova_norm_peak_min110_KAch_ethanol = -(Bebarova_peak_min110_KAch_ethanol / Bebarova_peak_min110_KAch)
+
+Oleary_Yang_norm_peak_ss_base_Kr = Oleary_Yang_peak_ss_base_Kr / np.max(np.abs(Oleary_Yang_peak_ss_base_Kr))
+Oleary_Yang_norm_peak_ss_ethanol_Kr_20 = Oleary_Yang_peak_ss_ethanol_Kr_20 / np.max(np.abs(Oleary_Yang_peak_ss_base_Kr))
+Oleary_Yang_norm_peak_ss_ethanol_Kr_200 = Oleary_Yang_peak_ss_ethanol_Kr_200 / np.max(np.abs(Oleary_Yang_peak_ss_base_Kr))
+Oleary_Yang_norm_peak_ss_ethanol_Kr_1000 = Oleary_Yang_peak_ss_ethanol_Kr_1000 / np.max(np.abs(Oleary_Yang_peak_ss_base_Kr))
+
+pl.figure("I-V Sodium Bebarova")
+pl.subplot(2,1,1)
+pl.plot(Bebarova_volt_steps_Na, Bebarova_norm_peak_ss_Na, '-r')
+pl.plot(Bebarova_volt_steps_Na, Bebarova_norm_peak_ss_Na_ethanol, '-b')
+pl.errorbar(Bebarova_exp_Na_ethanol_x, Bebarova_norm_exp_Na_base_y, Bebarova_norm_xerr_Na_base, linestyle='None', marker='o', mfc='red', mec='red')
+pl.errorbar(Bebarova_exp_Na_ethanol_x, Bebarova_norm_exp_Na_ethanol_y, Bebarova_norm_xerr_Na_ethanol, linestyle='None', marker='o', mfc='blue', mec='blue')
+pl.subplot(2,1,2)
+pl.bar(0, np.max(np.abs(Bebarova_norm_exp_Na_ethanol_y)), yerr=0.185495119, color='k')
+pl.bar(1, np.max(np.abs(Bebarova_norm_peak_ss_Na_ethanol)), color='g')
+pl.show()
+
+pl.figure("I-V Calcium Bebarova")
+pl.subplot(5,1,1)
+pl.plot(Bebarova_volt_steps_Ca, Bebarova_norm_peak_ss_Ca, '-r')
+pl.plot(Bebarova_volt_steps_Ca, Bebarova_norm_peak_ss_Ca_ethanol, '-b')
+pl.errorbar(Bebarova_exp_Ca_base_x, Bebarova_norm_exp_Ca_base_y, Bebarova_norm_xerr_Ca_base, linestyle='None', marker='o', mfc='red', mec='red')
+pl.errorbar(Bebarova_exp_Ca_base_x, Bebarova_norm_exp_Ca_ethanol_y, Bebarova_norm_xerr_Ca_ethanol, linestyle='None', marker='o', mfc='blue', mec='blue')
+pl.subplot(5,1,2)
+pl.bar(0, np.max(np.abs(Bebarova_norm_exp_Ca_ethanol_y)), yerr=0.168367347, color='k')
+pl.bar(1, np.max(np.abs(Bebarova_norm_peak_ss_Ca_ethanol)), color='g')
+pl.subplot(5,2,5)
+#pl.bar(-20, Bebarova_taus_Ca[2]/Bebarova_taus_Ca_ethanol[2], color='r')
+#pl.bar(-15, 2.863495808, color='b')
+pl.bar(-10, Bebarova_taus_Ca[3]/Bebarova_taus_Ca_ethanol[3], color='r')
+pl.bar(-5, 1.906217331, color='b')
+pl.bar(0, Bebarova_taus_Ca[4]/Bebarova_taus_Ca_ethanol[4], color='r')
+pl.bar(5, 1.415344198, color='b')
+pl.bar(10, Bebarova_taus_Ca[5]/Bebarova_taus_Ca_ethanol[5], color='r')
+pl.bar(15, 1.307312189, color='b')
+pl.bar(20, Bebarova_taus_Ca[6]/Bebarova_taus_Ca_ethanol[6], color='r')
+pl.bar(25, 1.281618066, color='b')
+pl.bar(30, Bebarova_taus_Ca[7]/Bebarova_taus_Ca_ethanol[7], color='r')
+pl.bar(35, 1.458119451, color='b')
+pl.bar(40, Bebarova_taus_Ca[8]/Bebarova_taus_Ca_ethanol[8], color='r')
+pl.bar(45, 1.563023534, color='b')
+#pl.semilogy(Bebarova_volt_steps_Ca, Bebarova_taus_Ca, '-r')
+#pl.semilogy(Bebarova_volt_steps_Ca, Bebarova_taus_Ca_ethanol, '-b')
+pl.xlim(-15, 50)
+#pl.ylim(90, 10000)
+pl.subplot(5,2,6)
+pl.semilogy(Bebarova_volt_steps_Ca, Bebarova_taus_Ca, '-r')
+pl.semilogy(Bebarova_volt_steps_Ca, Bebarova_taus_Ca_ethanol, '-b')
+pl.xlim(-15, 50)
+#pl.ylim(-10e10, 10)
+pl.subplot(5,2,7)
+pl.bar(-10, Bebarova_tauf_Ca[3]/Bebarova_tauf_Ca_ethanol[3], color='r')
+pl.bar(-5, 1.115356732, color='b')
+pl.bar(0, Bebarova_tauf_Ca[4]/Bebarova_tauf_Ca_ethanol[4], color='r')
+pl.bar(5, 1.02004819, color='b')
+pl.bar(10, Bebarova_tauf_Ca[5]/Bebarova_tauf_Ca_ethanol[5], color='r')
+pl.bar(15, 1.050876606, color='b')
+pl.bar(20, Bebarova_tauf_Ca[6]/Bebarova_tauf_Ca_ethanol[6], color='r')
+pl.bar(25, 1.061358418, color='b')
+pl.bar(30, Bebarova_tauf_Ca[7]/Bebarova_tauf_Ca_ethanol[7], color='r')
+pl.bar(35, 1.07194478, color='b')
+pl.bar(40, Bebarova_tauf_Ca[8]/Bebarova_tauf_Ca_ethanol[8], color='r')
+pl.bar(45, 1.093435333, color='b')
+#pl.semilogy(Bebarova_volt_steps_Ca, Bebarova_tauf_Ca, '-r')
+#pl.semilogy(Bebarova_volt_steps_Ca, Bebarova_tauf_Ca_ethanol, '-b')
+pl.xlim(-15, 50)
+pl.subplot(5,2,8)
+pl.semilogy(Bebarova_volt_steps_Ca, Bebarova_tauf_Ca, '-r')
+pl.semilogy(Bebarova_volt_steps_Ca, Bebarova_tauf_Ca_ethanol, '-b')
+pl.xlim(-15, 50)
+pl.subplot(5,2,9)
+pl.bar(-10, Bebarova_ratio_Ca[3]/Bebarova_ratio_Ca_ethanol[3], color='r')
+pl.bar(-5, 0.896341463, color='b')
+pl.bar(0, Bebarova_ratio_Ca[4]/Bebarova_ratio_Ca_ethanol[4], color='r')
+pl.bar(5, 0.868167203, color='b')
+pl.bar(10, Bebarova_ratio_Ca[5]/Bebarova_ratio_Ca_ethanol[5], color='r')
+pl.bar(15, 0.843205575, color='b')
+pl.bar(20, Bebarova_ratio_Ca[6]/Bebarova_ratio_Ca_ethanol[6], color='r')
+pl.bar(25, 0.859315589, color='b')
+pl.bar(30, Bebarova_ratio_Ca[7]/Bebarova_ratio_Ca_ethanol[7], color='r')
+pl.bar(35, 0.908713693, color='b')
+pl.bar(40, Bebarova_ratio_Ca[8]/Bebarova_ratio_Ca_ethanol[8], color='r')
+pl.bar(45, 0.844106464, color='b')
+#pl.plot(Bebarova_volt_steps_Ca, Bebarova_ratio_Ca, '-r')
+#pl.plot(Bebarova_volt_steps_Ca, Bebarova_ratio_Ca_ethanol, '-b')
+pl.xlim(-15, 50)
+#pl.ylim(0.5, 1.2)
+pl.subplot(5,2,10)
+pl.plot(Bebarova_volt_steps_Ca, Bebarova_ratio_Ca, '-r')
+pl.plot(Bebarova_volt_steps_Ca, Bebarova_ratio_Ca_ethanol, '-b')
+pl.xlim(-15, 50)
+#pl.ylim(0.5, 1.2)
+pl.show()
+
+#print Bebarova_taus_Ca
+#print Bebarova_taus_Ca_ethanol
+
+pl.figure("I-V Transient Outward Bebarova")
+pl.subplot(5,1,1)
+pl.plot(Bebarova_volt_steps_to, Bebarova_norm_peak_ss_to, '-r')
+pl.plot(Bebarova_volt_steps_to, Bebarova_norm_peak_ss_to_ethanol, '-b')
+pl.errorbar(Bebarova_exp_to_base_x, Bebarova_norm_exp_to_base_y, Bebarova_norm_xerr_to_base, linestyle='None', marker='o', mfc='red', mec='red')
+pl.errorbar(Bebarova_exp_to_base_x, Bebarova_norm_exp_to_ethanol_y, Bebarova_norm_xerr_to_ethanol, linestyle='None', marker='o', mfc='blue', mec='blue')
+pl.subplot(5,1,2)
+pl.bar(0, np.max(np.abs(Bebarova_norm_exp_to_ethanol_y)), yerr=0.153846154, color='k')
+pl.bar(1, np.max(np.abs(Bebarova_norm_peak_ss_to_ethanol)), color='g')
+pl.subplot(5,2,5)
+#pl.bar(-15, Bebarova_taus_to[4]/Bebarova_taus_to_ethanol[4], color='r')
+#pl.bar(-10, 0.733191449, color='b')
+pl.bar(0, Bebarova_taus_to[5]/Bebarova_taus_to_ethanol[5], color='r')
+pl.bar(5, 0.77858198, color='b')
+pl.bar(15, Bebarova_taus_to[6]/Bebarova_taus_to_ethanol[6], color='r')
+pl.bar(20, 1.522680183, color='b')
+pl.bar(30, Bebarova_taus_to[7]/Bebarova_taus_to_ethanol[7], color='r')
+pl.bar(35, 0.960746245, color='b')
+pl.bar(45, Bebarova_taus_to[8]/Bebarova_taus_to_ethanol[8], color='r')
+pl.bar(50, 1.173721925, color='b')
+pl.bar(60, Bebarova_taus_to[9]/Bebarova_taus_to_ethanol[9], color='r')
+pl.bar(65, 1.173522783, color='b')
+pl.bar(75, Bebarova_taus_to[10]/Bebarova_taus_to_ethanol[10], color='r')
+pl.bar(80, 1.010232923, color='b')
+#pl.semilogy(Bebarova_volt_steps_to, Bebarova_taus_to, '-r')
+#pl.semilogy(Bebarova_volt_steps_to, Bebarova_taus_to_ethanol, '-b')
+pl.xlim(-10, 90)
+pl.subplot(5,2,6)
+pl.semilogy(Bebarova_volt_steps_to, Bebarova_taus_to, '-r')
+pl.semilogy(Bebarova_volt_steps_to, Bebarova_taus_to_ethanol, '-b')
+pl.xlim(-10, 90)
+pl.subplot(5,2,7)
+#pl.bar(-15, Bebarova_tauf_to[4]/Bebarova_tauf_to_ethanol[4], color='r')
+#pl.bar(-10, 0.643717998, color='b')
+pl.bar(0, Bebarova_tauf_to[5]/Bebarova_tauf_to_ethanol[5], color='r')
+pl.bar(5, 1.162030136, color='b')
+pl.bar(15, Bebarova_tauf_to[6]/Bebarova_tauf_to_ethanol[6], color='r')
+pl.bar(20, 1.448336799, color='b')
+pl.bar(30, Bebarova_tauf_to[7]/Bebarova_tauf_to_ethanol[7], color='r')
+pl.bar(35, 1.522680183, color='b')
+pl.bar(45, Bebarova_tauf_to[8]/Bebarova_tauf_to_ethanol[8], color='r')
+pl.bar(50, 1.682725455, color='b')
+pl.bar(60, Bebarova_tauf_to[9]/Bebarova_tauf_to_ethanol[9], color='r')
+pl.bar(65, 1.617220896, color='b')
+pl.bar(75, Bebarova_tauf_to[10]/Bebarova_tauf_to_ethanol[10], color='r')
+pl.bar(80, 1.584624287, color='b')
+#pl.semilogy(Bebarova_volt_steps_to, Bebarova_tauf_to, '-r')
+#pl.semilogy(Bebarova_volt_steps_to, Bebarova_tauf_to_ethanol, '-b')
+pl.xlim(-10, 90)
+pl.subplot(5,2,8)
+pl.semilogy(Bebarova_volt_steps_to, Bebarova_tauf_to, '-r')
+pl.semilogy(Bebarova_volt_steps_to, Bebarova_tauf_to_ethanol, '-b')
+pl.xlim(-10, 90)
+pl.subplot(5,2,9)
+#pl.bar(-15, Bebarova_ratio_to[4]/Bebarova_ratio_to_ethanol[4], color='r')
+#pl.bar(-10, 1.189806678, color='b')
+pl.bar(0, Bebarova_ratio_to[5]/Bebarova_ratio_to_ethanol[5], color='r')
+pl.bar(5, 1.172435422, color='b')
+pl.bar(15, Bebarova_ratio_to[6]/Bebarova_ratio_to_ethanol[6], color='r')
+pl.bar(20, 1.102941176, color='b')
+pl.bar(30, Bebarova_ratio_to[7]/Bebarova_ratio_to_ethanol[7], color='r')
+pl.bar(35, 1.055354734, color='b')
+pl.bar(45, Bebarova_ratio_to[8]/Bebarova_ratio_to_ethanol[8], color='r')
+pl.bar(50, 1.058001398, color='b')
+pl.bar(60, Bebarova_ratio_to[9]/Bebarova_ratio_to_ethanol[9], color='r')
+pl.bar(65, 1.031577826, color='b')
+pl.bar(75, Bebarova_ratio_to[10]/Bebarova_ratio_to_ethanol[10], color='r')
+pl.bar(80, 1.017438722, color='b')
+#pl.plot(Bebarova_volt_steps_to, Bebarova_ratio_to, '-r')
+#pl.plot(Bebarova_volt_steps_to, Bebarova_ratio_to_ethanol, '-b')
+pl.xlim(-10, 90)
+#pl.ylim(0.5, 1.2)
+pl.subplot(5,2,10)
+pl.plot(Bebarova_volt_steps_to, Bebarova_ratio_to, '-r')
+pl.plot(Bebarova_volt_steps_to, Bebarova_ratio_to_ethanol, '-b')
+pl.xlim(-10, 90)
+pl.show()
+
+pl.figure("I-V K1 Bebarova")
+pl.subplot(2,1,1)
+pl.plot(Bebarova_volt_steps_K1, Bebarova_norm_peak_ss_K1, '-r')
+pl.plot(Bebarova_volt_steps_K1, Bebarova_norm_peak_ss_K1_ethanol, '-b')
+pl.errorbar(Bebarova_exp_K1_base_x, Bebarova_norm_exp_K1_base_y, Bebarova_norm_xerr_K1_base, linestyle='None', marker='o', mfc='red', mec='red')
+pl.errorbar(Bebarova_exp_K1_base_x, Bebarova_norm_exp_K1_ethanol_y, Bebarova_norm_xerr_K1_ethanol, linestyle='None', marker='o', mfc='blue', mec='blue')
+pl.subplot(2,2,3)
+pl.bar(0, np.max(Bebarova_norm_exp_K1_ethanol_y)/np.max(Bebarova_norm_exp_K1_base_y), color='k')
+pl.bar(1, np.max(Bebarova_norm_peak_ss_K1_ethanol)/np.max(Bebarova_norm_peak_ss_K1), color='g')
+pl.subplot(2,2,4)
+pl.bar(0, np.min(Bebarova_norm_exp_K1_ethanol_y)/np.min(Bebarova_norm_exp_K1_base_y), color='k')
+pl.bar(1, np.min(Bebarova_norm_peak_ss_K1_ethanol)/np.min(Bebarova_norm_peak_ss_K1), color='g')
+pl.show()
+
+pl.figure("Inact Calcium Bebarova")
+#pl.subplot(2,1,1)
+pl.plot(Bebarova_volt_steps_Ca_inact, Bebarova_norm_peak_ss_Ca_inact, '-r')
+pl.plot(Bebarova_volt_steps_Ca_inact, Bebarova_norm_peak_ss_Ca_ethanol_inact, '-b')
+pl.errorbar(inact_exp_Ca_base_x, inact_exp_Ca_base_y, inact_yerr_Ca_base, linestyle='None', marker='o', mfc='red', mec='red')
+pl.errorbar(inact_exp_Ca_base_x, inact_exp_Ca_ethanol_y, inact_yerr_Ca_ethanol, linestyle='None', marker='o', mfc='blue', mec='blue')
+#pl.subplot(2,1,2)
+#pl.bar(0, np.max(np.abs(Bebarova_norm_exp_Ca_ethanol_y)), yerr=0.168367347, color='k')
+#pl.bar(1, np.max(np.abs(Bebarova_norm_peak_ss_Ca_ethanol)), color='g')
+pl.show()
+
+pl.figure("Inact Transient Outward Bebarova")
+#pl.subplot(2,1,1)
+pl.plot(Bebarova_volt_steps_to_inact, Bebarova_norm_peak_ss_to_inact, '-r')
+pl.plot(Bebarova_volt_steps_to_inact, Bebarova_norm_peak_ss_to_ethanol_inact, '-b')
+pl.errorbar(inact_exp_to_base_x, inact_exp_to_base_slow_y, inact_yerr_to_base_slow_y, linestyle='None', marker='o', mfc='red', mec='red')
+pl.errorbar(inact_exp_to_base_x, inact_exp_to_ethanol_slow_y, inact_yerr_to_ethanol_slow_y, linestyle='None', marker='o', mfc='blue', mec='blue')
+pl.plot(inact_exp_to_base_x, inact_exp_to_base_fast_y, 'sr')
+pl.plot(inact_exp_to_base_x, inact_exp_to_ethanol_fast_y, 'sb')
+#pl.subplot(2,1,2)
+#pl.bar(0, np.max(np.abs(Bebarova_norm_exp_to_ethanol_y)), yerr=0.153846154, color='k')
+#pl.bar(1, np.max(np.abs(Bebarova_norm_peak_ss_to_ethanol)), color='g')
+pl.show()
+
+pl.figure("I-V Kur Hu et al")
+pl.plot(Hu_volt_steps_Kur, Hu_norm_peak_ss_base_Kur, '-r')
+pl.plot(Hu_volt_steps_Kur, Hu_norm_peak_ss_ethanol_Kur, '-b')
+pl.errorbar(exp_kur_base_x, exp_kur_base_y_norm, xerr_kur_base_y_norm, linestyle='None', marker='o', mfc='red', mec='red')
+pl.errorbar(exp_kur_base_x, exp_kur_ethanol_y_norm, xerr_kur_ethanol_y_norm, linestyle='None', marker='o', mfc='blue', mec='blue')
+pl.show()
+
+pl.figure("I-V KAch Bebarova")
+pl.bar(0, Bebarova_norm_peak_min110_KAch, color='r')
+pl.bar(5, -(-0.6666666666666671/-0.6666666666666671), yerr= 0.12/0.6666666666666671, color='k') #rat atrial cell
+pl.bar(10, -(-0.4677966101694913/-0.4677966101694913), yerr= 0.112/0.4677966101694913, color='k') #guinea pig atrial cell
+pl.bar(15, Bebarova_norm_peak_min110_KAch_ethanol, color='b')
+pl.bar(20, -(-1.1984126984126986/-0.6666666666666671), yerr= 0.2/0.6666666666666671, color='k') #rat atrial cell
+pl.bar(25, -(-0.7881355932203392/-0.4677966101694913), yerr= 0.21/0.4677966101694913, color='k') #guinea pig atrial cell
+pl.bar(30, Bebarova_norm_peak_min50_KAch, color='r')
+pl.bar(35, 0.35714285714285715/0.35714285714285715, yerr= 0.11/0.35714285714285715, color='k') #rat atrial cell
+pl.bar(40, 0.16271186440677965/0.16271186440677965, yerr= 0.055/0.16271186440677965, color='k') #guinea pig atrial cell
+pl.bar(45, Bebarova_norm_peak_min50_KAch_ethanol, color='b')
+pl.bar(50, 0.4841269841269842/0.35714285714285715, yerr= 0.12/0.35714285714285715, color='k') #rat atrial cell
+pl.bar(55, 0.2847457627118645/0.16271186440677965, yerr= 0.10/0.16271186440677965, color='k') #guinea pig atrial cell
+pl.show()
+
+pl.figure("I-V Kr O'Leary et al / Yang et al optimized to Himmel")
+pl.subplot(2,1,1)
+pl.plot(Oleary_yang_volt_steps, Oleary_Yang_norm_peak_ss_base_Kr, '-r')
+pl.plot(Oleary_yang_volt_steps, Oleary_Yang_norm_peak_ss_ethanol_Kr_20, '-b')
+pl.plot(Oleary_yang_volt_steps, Oleary_Yang_norm_peak_ss_ethanol_Kr_200, '-g')
+pl.plot(Oleary_yang_volt_steps, Oleary_Yang_norm_peak_ss_ethanol_Kr_1000, '-k')
+pl.subplot(2,1,2)
+pl.bar(0, 1, color='k')
+pl.bar(5, np.max(Oleary_Yang_norm_peak_ss_base_Kr), color='b')
+pl.bar(10, 0.9770480225988694, yerr = 0, color='k')
+pl.bar(15, np.max(Oleary_Yang_norm_peak_ss_ethanol_Kr_20), color='b')
+pl.bar(20, 0.7667490583804139, yerr = 0.0667, color='k')
+pl.bar(25, np.max(Oleary_Yang_norm_peak_ss_ethanol_Kr_200), color='b')
+pl.bar(30, 0.3574623352165722, yerr = 0, color='k')
+pl.bar(35, np.max(Oleary_Yang_norm_peak_ss_ethanol_Kr_1000), color='b')
+pl.show()
+
+##############################################################
+datalog_SCaEs_ctl, leak_SCaEs_ctl = runProtocol_SRleak(m, 0)
+datalog_SCaEs_0p8, leak_SCaEs_0p8 = runProtocol_SRleak(m, 21.7) #1 o/oo
+datalog_SCaEs_8, leak_SCaEs_8 = runProtocol_SRleak(m, 21.7*3) #3 o/oo
+datalog_SCaEs_80, leak_SCaEs_80 = runProtocol_SRleak(m, 21.7*6) #6 o/oo
+
+print "leak_SCaEs_ctl = " + np.str(leak_SCaEs_ctl)
+print "leak_SCaEs_21.7 = " + np.str(leak_SCaEs_0p8)
+print "leak_SCaEs_65.1 = " + np.str(leak_SCaEs_8)
+print "leak_SCaEs_130.2 = " + np.str(leak_SCaEs_80)
+
+norm_leak_SCaEs_ctl = leak_SCaEs_ctl / leak_SCaEs_ctl
+norm_leak_SCaEs_0p8 = leak_SCaEs_0p8 / leak_SCaEs_ctl
+norm_leak_SCaEs_8 = leak_SCaEs_8 / leak_SCaEs_ctl
+norm_leak_SCaEs_80 = leak_SCaEs_80 / leak_SCaEs_ctl
+
+nrows = 5
+ncols = 1
+pl.figure("Tetracaine-Caffeine Protocol / 0Na0Ca")
+pl.subplot(nrows,ncols,1)
+pl.plot(datalog_SCaEs_ctl['environment.time'], datalog_SCaEs_ctl['membrane.V'], "-k", datalog_SCaEs_0p8['environment.time'], datalog_SCaEs_0p8['membrane.V'], "-r", datalog_SCaEs_8['environment.time'], datalog_SCaEs_8['membrane.V'], "-b", datalog_SCaEs_80['environment.time'], datalog_SCaEs_80['membrane.V'], "-g")
+pl.subplot(nrows,ncols,2)
+pl.plot(datalog_SCaEs_ctl['environment.time'], datalog_SCaEs_ctl['membrane.I_ion'], "-k", datalog_SCaEs_0p8['environment.time'], datalog_SCaEs_0p8['membrane.I_ion'], "-r", datalog_SCaEs_8['environment.time'], datalog_SCaEs_8['membrane.I_ion'], "-b", datalog_SCaEs_80['environment.time'], datalog_SCaEs_80['membrane.I_ion'], "-g")
+pl.subplot(nrows,ncols,3)
+pl.plot(datalog_SCaEs_ctl['environment.time'], datalog_SCaEs_ctl['output.Cai'], "-k", datalog_SCaEs_0p8['environment.time'], datalog_SCaEs_0p8['output.Cai'], "-r", datalog_SCaEs_8['environment.time'], datalog_SCaEs_8['output.Cai'], "-b", datalog_SCaEs_80['environment.time'], datalog_SCaEs_80['output.Cai'], "-g")
+pl.subplot(nrows,ncols,4)
+pl.plot(datalog_SCaEs_ctl['environment.time'], datalog_SCaEs_ctl['output.Cai'], "-k", datalog_SCaEs_0p8['environment.time'], datalog_SCaEs_0p8['output.Cai'], "-r", datalog_SCaEs_8['environment.time'], datalog_SCaEs_8['output.Cai'], "-b", datalog_SCaEs_80['environment.time'], datalog_SCaEs_80['output.Cai'], "-g")
+pl.ylim(0.0,1.2)
+pl.subplot(nrows,ncols,5)
+pl.plot(datalog_SCaEs_ctl['environment.time'], datalog_SCaEs_ctl['Na_Ca_exchanger_current.i_NaCa'], "-k", datalog_SCaEs_0p8['environment.time'], datalog_SCaEs_0p8['Na_Ca_exchanger_current.i_NaCa'], "-r", datalog_SCaEs_8['environment.time'], datalog_SCaEs_8['Na_Ca_exchanger_current.i_NaCa'], "-b", datalog_SCaEs_80['environment.time'], datalog_SCaEs_80['Na_Ca_exchanger_current.i_NaCa'], "-g")
+pl.show()
+
+pl.figure("SR Ca leak")
+pl.subplot(2,1,1)
+pl.title("vs. Ca-spark method (F/F0)")
+pl.bar(0, norm_leak_SCaEs_ctl, color='r')
+pl.bar(5, 1, yerr= 0.134615, color='k') 
+pl.bar(10, norm_leak_SCaEs_0p8, color='b')
+pl.bar(15, 1.660256, yerr= 0.25, color='k') 
+pl.bar(20, norm_leak_SCaEs_8, color='b')
+pl.bar(25, 1.775641, yerr= 0.282051, color='k') 
+pl.bar(30, norm_leak_SCaEs_80, color='b')
+pl.bar(35, 2.025641, yerr= 0.378205, color='k') 
+pl.subplot(2,1,2)
+pl.title("vs. Tetracaine Fluorescent shift")
+pl.bar(0, norm_leak_SCaEs_ctl, color='r')
+pl.bar(5, 1, yerr= 0.091836735, color='k') 
+pl.bar(10, norm_leak_SCaEs_80, color='b')
+pl.bar(15, 1.329931973, yerr= 0.12244898, color='k') 
+pl.show()
+
+##############################################################
+datalog_caffeine_ctl = runProtocol_caffeine(m, 0)
+datalog_caffeine_0p8 = runProtocol_caffeine(m, 21.7) #1 o/oo
+datalog_caffeine_8 = runProtocol_caffeine(m, 21.7*3) #3 o/oo
+datalog_caffeine_80 = runProtocol_caffeine(m, 21.7*6) #6 o/oo
+
+nrows = 5
+ncols = 1
+pl.figure("Caffeine Protocol")
+pl.subplot(nrows,ncols,1)
+pl.plot(datalog_caffeine_ctl['environment.time'], datalog_caffeine_ctl['membrane.V'], "-k", datalog_caffeine_0p8['environment.time'], datalog_caffeine_0p8['membrane.V'], "-r", datalog_caffeine_8['environment.time'], datalog_caffeine_8['membrane.V'], "-b", datalog_caffeine_80['environment.time'], datalog_caffeine_80['membrane.V'], "-g")
+pl.subplot(nrows,ncols,2)
+pl.plot(datalog_caffeine_ctl['environment.time'], datalog_caffeine_ctl['membrane.I_ion'], "-k", datalog_caffeine_0p8['environment.time'], datalog_caffeine_0p8['membrane.I_ion'], "-r", datalog_caffeine_8['environment.time'], datalog_caffeine_8['membrane.I_ion'], "-b", datalog_caffeine_80['environment.time'], datalog_caffeine_80['membrane.I_ion'], "-g")
+pl.subplot(nrows,ncols,3)
+pl.plot(datalog_caffeine_ctl['environment.time'], datalog_caffeine_ctl['output.Cai'], "-k", datalog_caffeine_0p8['environment.time'], datalog_caffeine_0p8['output.Cai'], "-r", datalog_caffeine_8['environment.time'], datalog_caffeine_8['output.Cai'], "-b", datalog_caffeine_80['environment.time'], datalog_caffeine_80['output.Cai'], "-g")
+pl.subplot(nrows,ncols,4)
+pl.plot(datalog_caffeine_ctl['environment.time'], datalog_caffeine_ctl['output.Cai'], "-k", datalog_caffeine_0p8['environment.time'], datalog_caffeine_0p8['output.Cai'], "-r", datalog_caffeine_8['environment.time'], datalog_caffeine_8['output.Cai'], "-b", datalog_caffeine_80['environment.time'], datalog_caffeine_80['output.Cai'], "-g")
+pl.ylim(0.0,1.2)
+pl.subplot(nrows,ncols,5)
+pl.plot(datalog_caffeine_ctl['environment.time'], datalog_caffeine_ctl['Na_Ca_exchanger_current.i_NaCa'], "-k", datalog_caffeine_0p8['environment.time'], datalog_caffeine_0p8['Na_Ca_exchanger_current.i_NaCa'], "-r", datalog_caffeine_8['environment.time'], datalog_caffeine_8['Na_Ca_exchanger_current.i_NaCa'], "-b", datalog_caffeine_80['environment.time'], datalog_caffeine_80['Na_Ca_exchanger_current.i_NaCa'], "-g")
+pl.show()
+
+""" # VM #
+pl.bar(0, norm_leak_SCaEs_ctl, color='r')
+pl.bar(5, 1, yerr= 0.192982456, color='k') 
+pl.bar(10, norm_leak_SCaEs_0p8, color='b')
+pl.bar(15, 1.307017544, yerr= 0.219298246, color='k') 
+pl.bar(20, norm_leak_SCaEs_8, color='b')
+pl.bar(25, 1.973684211, yerr= 0.333333333, color='k') 
+pl.bar(30, norm_leak_SCaEs_80, color='b')
+pl.bar(35, 2.184210526, yerr= 0.350877193, color='k') 
+"""
+"""
+np.savetxt('Figure_courtemanche_iv_Na.csv', np.c_[Bebarova_volt_steps_Na, Bebarova_norm_peak_ss_Na, Bebarova_norm_peak_ss_Na_ethanol], delimiter=',')  
+np.savetxt('Figure_courtemanche_iv_Ca.csv', np.c_[Bebarova_volt_steps_Ca, Bebarova_norm_peak_ss_Ca, Bebarova_norm_peak_ss_Ca_ethanol], delimiter=',')  
+np.savetxt('Figure_courtemanche_iv_K1.csv', np.c_[Bebarova_volt_steps_K1, Bebarova_norm_peak_ss_K1, Bebarova_norm_peak_ss_K1_ethanol], delimiter=',')  
+np.savetxt('Figure_courtemanche_iv_to.csv', np.c_[Bebarova_volt_steps_to, Bebarova_norm_peak_ss_to, Bebarova_norm_peak_ss_to_ethanol], delimiter=',')
+np.savetxt('Figure_courtemanche_iv_Kur.csv', np.c_[Hu_volt_steps_Kur, Hu_norm_peak_ss_base_Kur, Hu_norm_peak_ss_ethanol_Kur], delimiter=',')
+np.savetxt('Figure_courtemanche_iv_KAch.csv', np.c_[Bebarova_norm_peak_min110_KAch, Bebarova_norm_peak_min110_KAch_ethanol, Bebarova_norm_peak_min50_KAch, Bebarova_norm_peak_min50_KAch_ethanol], delimiter=',')
+np.savetxt('Figure_courtemanche_iv_leak.csv', np.c_[norm_leak_SCaEs_ctl, norm_leak_SCaEs_80], delimiter=',')
+
+np.savetxt('Figure_courtemanche_TCprotocol_VM_ctl.csv', np.c_[datalog_SCaEs_ctl['environment.time'], datalog_SCaEs_ctl['membrane.V']], delimiter=',')
+np.savetxt('Figure_courtemanche_TCprotocol_VM_0p8.csv', np.c_[datalog_SCaEs_0p8['environment.time'], datalog_SCaEs_0p8['membrane.V']], delimiter=',')
+np.savetxt('Figure_courtemanche_TCprotocol_VM_8.csv', np.c_[datalog_SCaEs_8['environment.time'], datalog_SCaEs_8['membrane.V']], delimiter=',')
+np.savetxt('Figure_courtemanche_TCprotocol_VM_80.csv', np.c_[datalog_SCaEs_80['environment.time'], datalog_SCaEs_80['membrane.V']], delimiter=',')
+np.savetxt('Figure_courtemanche_TCprotocol_IM_ctl.csv', np.c_[datalog_SCaEs_ctl['environment.time'], datalog_SCaEs_ctl['membrane.I_ion']], delimiter=',')
+np.savetxt('Figure_courtemanche_TCprotocol_IM_0p8.csv', np.c_[datalog_SCaEs_0p8['environment.time'], datalog_SCaEs_0p8['membrane.I_ion']], delimiter=',')
+np.savetxt('Figure_courtemanche_TCprotocol_IM_8.csv', np.c_[datalog_SCaEs_8['environment.time'], datalog_SCaEs_8['membrane.I_ion']], delimiter=',')
+np.savetxt('Figure_courtemanche_TCprotocol_IM_80.csv', np.c_[datalog_SCaEs_80['environment.time'], datalog_SCaEs_80['membrane.I_ion']], delimiter=',')
+np.savetxt('Figure_courtemanche_TCprotocol_Cai_ctl.csv', np.c_[datalog_SCaEs_ctl['environment.time'], datalog_SCaEs_ctl['output.Cai']], delimiter=',')
+np.savetxt('Figure_courtemanche_TCprotocol_Cai_0p8.csv', np.c_[datalog_SCaEs_0p8['environment.time'], datalog_SCaEs_0p8['output.Cai']], delimiter=',')
+np.savetxt('Figure_courtemanche_TCprotocol_Cai_8.csv', np.c_[datalog_SCaEs_8['environment.time'], datalog_SCaEs_8['output.Cai']], delimiter=',')
+np.savetxt('Figure_courtemanche_TCprotocol_Cai_80.csv', np.c_[datalog_SCaEs_80['environment.time'], datalog_SCaEs_80['output.Cai']], delimiter=',')
+"""
+
